@@ -1,0 +1,38 @@
+# Keeping the build context small directly reduces build time — every file here
+# would otherwise be sent to the Docker daemon on every build.
+
+node_modules
+**/node_modules
+
+# build output
+**/dist
+**/.next
+**/out
+**/*.tsbuildinfo
+
+# never ship secrets into an image layer
+.env
+.env.*
+!.env.example
+
+# local artefacts
+**/coverage
+**/uploads
+**/logs
+**/*.log
+**/tmp
+
+# vcs / editor / docs
+.git
+.github
+.gitignore
+.vscode
+.idea
+**/.DS_Store
+*.md
+!README.md
+
+# tests are not needed in a runtime image
+**/tests
+**/*.test.ts
+**/*.spec.ts

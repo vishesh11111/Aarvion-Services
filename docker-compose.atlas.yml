@@ -1,0 +1,32 @@
+# =============================================================================
+# Overlay for running against MongoDB Atlas (or any external MongoDB).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.atlas.yml up -d
+#
+# The base stack ships a local MongoDB so `docker compose up` works with zero
+# configuration. When MONGODB_URI points at Atlas that container is dead weight —
+# and worse, `depends_on: mongo` makes the API wait for a database it will never
+# use. This overlay removes it from the picture.
+#
+# Redis is still local: it is a queue and cache, not customer data, and running
+# it next to the workers is the right default.
+# =============================================================================
+
+services:
+  # An unactivated profile excludes the service entirely — `docker compose up`
+  # never starts it, and it is not part of the dependency graph.
+  mongo:
+    profiles: ['disabled']
+
+  # `!override` is required: Compose *merges* `depends_on` by default, so without
+  # it the base file's `mongo` dependency would survive and reference a service
+  # this overlay has disabled — "depends on undefined service mongo".
+  api:
+    depends_on: !override
+      redis:
+        condition: service_healthy
+
+  worker:
+    depends_on: !override
+      redis:
+        condition: service_healthy

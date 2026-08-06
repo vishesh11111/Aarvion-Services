@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Colour tokens.
+ *
+ * Every colour in the UI resolves through one of these, so the dark theme is a
+ * single block of overrides rather than a `dark:` variant scattered across
+ * hundreds of class lists. Values are space-separated RGB channels so Tailwind's
+ * `<alpha-value>` syntax works.
+ */
+:root {
+  --bg: 248 250 252;
+  --surface: 255 255 255;
+  --surface-2: 241 245 249;
+  --border: 226 232 240;
+  --fg: 15 23 42;
+  --muted: 100 116 139;
+
+  --brand: 79 70 229;
+  --brand-fg: 255 255 255;
+  --brand-soft: 238 242 255;
+
+  --success: 22 163 74;
+  --warning: 217 119 6;
+  --danger: 220 38 38;
+  --info: 2 132 199;
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dark {
+  --bg: 9 12 20;
+  --surface: 18 22 33;
+  --surface-2: 27 33 47;
+  --border: 40 48 66;
+  --fg: 226 232 240;
+  --muted: 148 163 184;
+
+  --brand: 129 120 250;
+  --brand-fg: 12 14 22;
+  --brand-soft: 33 32 66;
+
+  --success: 74 222 128;
+  --warning: 250 204 21;
+  --danger: 248 113 113;
+  --info: 56 189 248;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--border));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+  }
+
+  /* Visible focus for keyboard users, suppressed for mouse clicks. Removing
+     outlines entirely is the single most common accessibility regression. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-bg;
+  }
+
+  ::selection {
+    @apply bg-brand/25;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-border bg-surface shadow-card;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg
+           placeholder:text-muted transition-colors
+           focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25
+           disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-fg;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2
+           text-sm font-medium transition-colors
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand text-brand-fg hover:bg-brand/90;
+  }
+
+  .btn-secondary {
+    @apply btn border border-border bg-surface text-fg hover:bg-surface-2;
+  }
+
+  .btn-ghost {
+    @apply btn text-muted hover:bg-surface-2 hover:text-fg;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger text-white hover:bg-danger/90;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
+  }
+
+  /* Loading placeholder that mirrors the shape of the content it replaces,
+     so the layout does not jump when data arrives. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-surface-2;
+  }
+
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r
+           from-transparent via-black/5 to-transparent content-[''];
+  }
+}
+
+/* Respect the user's motion preference — this is a WCAG requirement, not a nicety. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Thin scrollbars in dense data views. */
+@supports (scrollbar-width: thin) {
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--border)) transparent;
+  }
+}

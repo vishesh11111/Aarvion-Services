@@ -1,0 +1,167 @@
+# =============================================================================
+# Aarvion CRM — full local stack
+#
+#   cp .env.example .env      # set the two JWT secrets (GEMINI_API_KEY optional)
+#   docker compose up -d --build
+#   docker compose exec api npm run db:indexes:prod
+#   docker compose exec api npm run db:seed:prod
+#
+# Then: http://localhost:3000  (app)   http://localhost:4000/api/v1/docs  (API)
+#
+# Five services, matching the production topology:
+#   mongo · redis · api · worker · web
+#
+# By default the stack uses its own local MongoDB. To point at Atlas instead,
+# set MONGODB_URI in .env — the api/worker services read it, and the local
+# `mongo` service simply goes unused.
+# =============================================================================
+
+name: aarvion-crm
+
+services:
+  # ---------------------------------------------------------------------------
+  # MongoDB as a SINGLE-NODE REPLICA SET.
+  #
+  # Not a stylistic choice: MongoDB only supports multi-document transactions on
+  # a replica set or sharded cluster. A plain `mongod` would make every
+  # transactional path in the app silently fall back to non-atomic writes, so the
+  # local environment would not match production (Atlas is always a replica set)
+  # and a transaction bug would only ever appear after deploy.
+  #
+  # The healthcheck initiates the replica set on first boot and is idempotent
+  # afterwards, so `docker compose up` needs no manual `rs.initiate()`.
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '${MONGO_PORT:-27017}:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: >
+        mongosh --quiet --eval "
+          try { rs.status().ok }
+          catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }
+        "
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # `appendonly` so queued jobs survive a container restart. Losing an
+    # in-flight import because Redis restarted is data loss from the user's view.
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      # Pinned, not inherited from .env. The same .env is used by `npm run dev`
+      # on the host, where NODE_ENV=development is correct — but these images are
+      # production builds with no devDependencies, so inheriting that value would
+      # start a production container in development mode.
+      NODE_ENV: production
+      API_PORT: 4000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Inside the compose network, services resolve by service name.
+      # `directConnection=true` is required to talk to a single-node replica set
+      # whose advertised host differs from the one we dial.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/aarvion_crm?replicaSet=rs0&directConnection=true}
+      MONGO_POOL_SIZE: ${MONGO_POOL_SIZE:-20}
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required — see .env.example}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required — see .env.example}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-30d}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      AI_DAILY_REQUEST_LIMIT: ${AI_DAILY_REQUEST_LIMIT:-1000}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-52428800}
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - '${API_PORT:-4000}:4000'
+    volumes:
+      # Shared with the worker: the API writes the upload, the worker reads it.
+      # In a multi-host deployment this becomes object storage (S3/GCS).
+      - uploads:/data/uploads
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    # Same image, different entry point.
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/aarvion_crm?replicaSet=rs0&directConnection=true}
+      MONGO_POOL_SIZE: ${MONGO_WORKER_POOL_SIZE:-10}
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?required}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      IMPORT_WORKER_CONCURRENCY: ${IMPORT_WORKER_CONCURRENCY:-4}
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-2}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    # No published port and no HTTP endpoint: liveness is "the process is alive".
+    healthcheck:
+      test: ['CMD-SHELL', 'pgrep -f dist/worker.js > /dev/null || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      # The browser never talks to the API directly — the Next.js BFF proxy does,
+      # over the internal network.
+      API_INTERNAL_URL: http://api:4000
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+
+volumes:
+  mongo_data:
+  redis_data:
+  uploads:

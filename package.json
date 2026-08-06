@@ -1,0 +1,31 @@
+{
+  "name": "aarvion-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-powered multi-tenant CRM platform for importing, managing and organizing customer leads (MERN + TypeScript)",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @aarvion/api\" \"npm run dev -w @aarvion/web\"",
+    "dev:worker": "npm run dev:worker -w @aarvion/api",
+    "build": "npm run build -w @aarvion/api && npm run build -w @aarvion/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "ai:check": "npm run ai:check -w @aarvion/api",
+    "db:indexes": "npm run db:indexes -w @aarvion/api",
+    "db:seed": "npm run db:seed -w @aarvion/api",
+    "db:reset": "npm run db:reset -w @aarvion/api",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
